@@ -32,16 +32,24 @@ $$;
 
 -- result: 'synced' | 'retry' (transient, go back to pending) | 'fatal' (400/404,
 -- needs a human, stop burning attempts).
+-- plpgsql rather than a plain sql function: Postgres parses a CHECK on a
+-- function parameter and then silently ignores it, so the guard has to live in
+-- the body to actually reject a typo like 'syncd'.
 create or replace function public.finish_crm_sync(
   p_purchase_id uuid,
-  p_result text check (p_result in ('synced', 'retry', 'fatal')),
+  p_result text,
   p_error text default null
 )
 returns void
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
+begin
+  if p_result is null or p_result not in ('synced', 'retry', 'fatal') then
+    raise exception 'finish_crm_sync: unexpected result %', p_result;
+  end if;
+
   update public.crm_sync
      set status = case p_result when 'synced' then 'synced'
                                 when 'fatal'  then 'failed'
@@ -52,6 +60,7 @@ as $$
          last_attempt_at = now()
    where purchase_id = p_purchase_id
      and status = 'syncing';
+end;
 $$;
 
 -- Rows the retry command / admin endpoint should work on: never-synced, failed,

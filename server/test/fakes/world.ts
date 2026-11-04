@@ -59,6 +59,7 @@ export function makeTestEnv(overrides: Partial<AppEnv> = {}): AppEnv {
     zohoPaidStage: 'Closed Won',
     zohoRedirectUri: 'http://localhost:8790/zoho/callback',
     zohoSimulateFailure: false,
+    trustProxy: 0,
     seedClientPassword: 'TestAccess!234',
     zohoDealIdClientA: 'deal-a',
     zohoDealIdClientB: 'deal-b',

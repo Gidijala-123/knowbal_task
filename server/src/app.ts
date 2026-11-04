@@ -10,6 +10,10 @@ import { createWebhookRouter } from './routes/webhook.js';
 export function createApp(deps: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
+  // 0 means "trust nothing but the socket", which is the safe default when this
+  // process is exposed directly. Set TRUST_PROXY to the number of proxy hops in
+  // front of it so the per-IP rate limits see real client addresses.
+  app.set('trust proxy', deps.env.trustProxy);
 
   // Locked to the portal origin. Requests with no Origin header (curl, the
   // Stripe CLI, the webhook itself) are allowed through by cors by default.

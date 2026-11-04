@@ -22,14 +22,17 @@ straight from Supabase under Row Level Security.
 | TypeScript compiles across both workspaces | `npm run typecheck` |
 | Portal bundle builds | `npm run build -w web` |
 | Server boots and every guard answers correctly | manual probe: `/api/health` 200, unsigned webhook 400, no-token checkout 401, bad admin key 401 |
+| The **production** start path | `npm run build` then `NODE_ENV=production node server/dist/index.js` on a throwaway dummy env: health 200 and the same three guard answers; the compiled output imports only the six runtime packages, so `npm ci --omit=dev` boots it |
+| Perf claims that are numbers, not opinions | `vite build` output gzip-measured before/after the chunk split, and the Stripe/Node defaults read out of the installed `stripe@17.7.0` and `https.globalAgent` (section 5C). The compiled server was booted again afterwards on a spare port |
 
 | Needs your credentials before it can be claimed | Why |
 | --- | --- |
-| The five SQL migrations actually running | No Postgres/Docker on this machine. Apply them (section 4C) before the demo and report any error. |
+| The six SQL migrations actually running | No Postgres/Docker on this machine. Apply them (section 4C) before the demo and report any error. |
 | A real Stripe redirect | Requires `sk_test_...` |
 | A real Zoho Deal turning to Closed Won | Requires the OAuth refresh token |
 | RLS isolation against a live project | `RUN_INTEGRATION=1 npm run test:integration -w server` — it is skipped, not deleted, when credentials are absent |
 | Clicking through the portal in a browser | Requires Supabase + Stripe |
+| Observing the SIGTERM drain | Windows cannot deliver `SIGTERM` to a Node process; the handler is registered and the shutdown path is exercised on the deploy host (section 5B, point 4) |
 
 The offline tests run against an in-memory repository that mirrors the unique
 constraints and the lease logic of the SQL, which is why they are meaningful
@@ -95,6 +98,7 @@ Three rules the whole design rests on:
 │  ├─ migrations/0003_grant_purchase.sql    the one-transaction grant
 │  ├─ migrations/0004_crm_sync.sql          claim / finish / list-due
 │  ├─ migrations/0005_revoke_access.sql     refund path
+│  ├─ migrations/0006_performance.sql       indexes + ANALYZE (section 5C)
 │  └─ seed.sql                              SQL alternative to npm run seed
 ├─ server/
 │  ├─ src/env.ts                            zod-validated env, fail fast
@@ -108,6 +112,8 @@ Three rules the whole design rests on:
 │  ├─ src/lib/{supabaseAdmin,supabaseAuth}.ts
 │  ├─ src/middleware/{requireUser,rateLimit}.ts
 │  ├─ src/scripts/{seed,retryCrmSync,zohoBootstrap}.ts
+│  ├─ tsconfig.json                         strict, noEmit (typecheck + tests)
+│  ├─ tsconfig.build.json                   emits dist/ for `npm start`
 │  └─ test/                                 40 offline tests + 1 live RLS test
 └─ web/
    ├─ src/{App,Login,Portal}.tsx            two screens
@@ -154,6 +160,11 @@ Do these yourself; nothing here needs the code.
 
 1. Dashboard → switch to **Test mode**. Copy the secret key `sk_test_...`.
 2. Install the CLI and authenticate: `stripe login`.
+   Windows: `winget install --id Stripe.StripeCli -e` (open a **new** terminal
+   afterwards — the installer changes `PATH`). macOS:
+   `brew install stripe/stripe-cli/stripe`. Either way the binary comes from
+   `github.com/stripe/stripe-cli/releases`. Verify with `stripe --version`.
+   It is not an npm package, so `npm install` does not provide it.
 3. Do **not** create a Dashboard webhook endpoint for local work. `stripe listen`
    prints a `whsec_...` secret for your `.env`; a Dashboard endpoint secret will
    not verify local deliveries.
@@ -169,6 +180,8 @@ Do these yourself; nothing here needs the code.
 3. Apply the migrations, either way:
    - CLI: `supabase link --project-ref <ref>` then `supabase db push`
    - SQL editor: run the five files in `supabase/migrations/` in numeric order.
+   The SQL editor route needs nothing installed, so a missing Supabase CLI is
+   not a blocker — paste each file top to bottom, 0001 through 0006.
 4. Storage → New bucket → **`client-documents`**, private. Upload any PDF at the
    key `sample-document.pdf`.
 5. Seed: `npm run seed` (creates the two auth users, the two client rows and the
@@ -177,7 +190,14 @@ Do these yourself; nothing here needs the code.
 
 ---
 
-## 5. Local setup
+## 5. Running it — local and production
+
+### 5A. Local
+
+Needs Node 20+ (`engines` in the root `package.json`) and the Stripe CLI from
+4B.2. Everything else is npm: one `npm install` at the root populates both
+workspaces and hoists `tsx`, `vitest`, `typescript` and `vite` into
+`node_modules/.bin`.
 
 ```bash
 git init && npm install              # workspaces: server + web
@@ -203,9 +223,129 @@ both with the password in `SEED_CLIENT_PASSWORD`.
 | `npm run retry-crm-sync -- --list` | show what is owed, call nothing |
 | `npm run typecheck` | both workspaces |
 
+### 5B. Production
+
+The server runs **compiled**, so a production host needs no dev tooling:
+
+```bash
+npm run build        # server/dist (plain ESM) + web/dist (static bundle)
+npm ci --omit=dev    # runtime install: dependencies only, no typescript/vitest
+npm start            # node server/dist/index.js
+```
+
+`server/dist/**/*.js` imports exactly six packages — `express`, `cors`,
+`dotenv`, `stripe`, `zod`, `@supabase/supabase-js` — and nothing from
+`devDependencies`. That is what makes `--omit=dev` safe rather than hopeful, and
+it is checkable in one command:
+`grep -rhoE "from '[^.n][^']*'" server/dist --include=*.js | sort -u`.
+
+On the host:
+
+1. **No `.env` file.** Set the same variable names in the platform's secret
+   store; dotenv finds no file and the process reads the injected environment.
+   `loadEnv` still fails fast on a missing variable and prints names only.
+2. **`TRUST_PROXY=1`** behind the platform's single reverse proxy. Left at 0,
+   `req.ip` is the proxy's address, so the per-IP rate limit would count every
+   visitor as one client. Keep it 0 when the process is exposed directly —
+   trusting `X-Forwarded-For` you do not need to trust is a spoofing hole.
+3. **Health check** `GET /api/health` returns `{"ok":true,...}` with no database
+   round-trip. Deliberate: a Supabase or Zoho outage should not make the platform
+   restart a process that is still able to serve and to receive webhooks.
+4. **Graceful drain.** `SIGTERM`/`SIGINT` stop the listener, close idle
+   keep-alive sockets, let in-flight requests finish, and force-exit after 10s.
+   Not observable on Windows — it cannot deliver `SIGTERM` to a Node process —
+   so check it on the deploy target with `kill -TERM <pid>` and look for
+   `shutdown started` then `shutdown complete` in the log.
+5. **Portal** is served statically from `web/dist`; `VITE_API_BASE_URL` must
+   point at the server origin, and that origin must match the server's
+   `APP_BASE_URL` (CORS and the Stripe success URL are both built from it).
+   Vite inlines `VITE_*` at **build** time, so rebuild after changing them.
+6. **Stripe**: register the live-test webhook endpoint as
+   `https://<host>/api/webhook` and use the **dashboard** secret, not the
+   `stripe listen` one. This is the single most common cause of
+   `400 invalid_signature` in production.
+7. **One instance.** The rate limiter and the Zoho token cache are per-process,
+   so two instances double the limits and refresh tokens independently. Scaling
+   past one needs Redis first (see `TRADEOFFS.md`).
+8. **Migrations are out of band** (`supabase db push` or the SQL editor), never
+   at boot — a container restart must not attempt DDL.
+
+Cron/CLI work on a host without devDependencies uses the compiled scripts:
+`node server/dist/scripts/retryCrmSync.js --list` (same flags as the npm
+wrapper). A scheduled call to that command, or to
+`POST /api/admin/retry-crm-sync`, is the missing sweeper described in
+`TRADEOFFS.md`.
+
+---
+
+### 5C. Performance work
+
+Asked for after the brief's requirements were met. Every number below is
+measured on this machine; where a claim could not be measured, it says so.
+
+**Portal round trips (`web/src/Portal.tsx`).** The worst defect was not in SQL.
+`refresh` had `snapshot` in its `useCallback` deps and called `setSnapshot`, so
+every render minted a new `refresh`, the mount effect re-ran, and the portal
+re-queried all four tables forever — an unbounded request loop that only a live
+Supabase project would have shown, and this one has no credentials yet. It now
+keeps the latest rows in a ref, so `refresh` is created once. Three more changes
+in the same file: the four first-load queries still run with `Promise.all` (one
+round trip, not four), the per-card `.find()` scans are replaced by three
+`useMemo` Maps, and the post-payment poll asks for `entitlements` alone instead
+of all four tables — the wait went from 120 queries to at most 30 plus one full
+refresh at the end. Not clicked through: needs Supabase credentials.
+
+**Indexes (`supabase/migrations/0006_performance.sql`).** One genuine gap: the
+refund path joins `entitlements.purchase_id` to `purchases`, and that column had
+no index at all, so revoking access read every entitlement row (it is also the
+column `ON DELETE CASCADE` has to probe). The sweeper's old
+`(status, last_attempt_at)` composite indexed already-synced rows forever and
+matched neither branch of its `OR`, so it became two partial indexes with
+explicit `asc nulls first`, which is the ordering `list_crm_sync_due()` asks
+for. Plus `ANALYZE` on the three tables the webhooks write. **No `EXPLAIN`
+numbers exist for any of this** — there is no Postgres on this machine, and at
+demo row counts every index is invisible anyway. They are attributed to a named
+query so a reviewer can check the reasoning instead of trusting a benchmark.
+
+**Bundle (`web/vite.config.ts`).** `build.target: 'es2022'` and a manual split
+into `react` / `supabase` / app chunks, then rebuilt and measured (JavaScript
+only, CSS is 2,109 B / 853 B gzip and untouched):
+
+| | raw | gzip |
+| --- | ---: | ---: |
+| before — one `index.js` | 377,585 B | 107,083 B |
+| after — `supabase` 223,762 + `react` 140,855 + app 9,910 | 374,527 B | 107,764 B |
+
+So `es2022` (not measured separately from the split) took ~3 kB off the raw
+bytes, and the split *added* 0.7 kB gzip to the first load because three files
+compress independently. What it buys is the redeploy case: editing portal code
+now re-downloads 4 kB of app chunk instead of 107 kB, because the two vendor
+hashes do not move. `web/src/supabaseClient.ts` also injects `preconnect` links
+for the Supabase and API origins, which are only known from env at runtime so
+they cannot be static tags in `index.html`.
+
+The one large lever left is named rather than pulled: `@supabase/supabase-js`
+is 58 kB of the 108 kB gzip and its bundle carries realtime/socket code the
+portal never subscribes to. Reaching the same rows with plain `fetch` against
+PostgREST would drop most of it — and would also mean hand-rolling JWT refresh
+for a brief that says the browser must read Supabase directly. Bad trade, so it
+stays.
+
+**Stripe calls (`server/src/runtime.ts`).** Checked against the installed
+`stripe@17.7.0` source rather than from memory: its default `timeout` is 80,000
+ms with 2 retries, so a hung connection could sit on a checkout request for four
+minutes. Now `timeout: 15_000, maxNetworkRetries: 2`. No custom `httpAgent` was
+added — `require('https').globalAgent` on this Node (v24.19.0) already reports
+`keepAlive: true`, and supplying an agent only moves the SDK onto its
+raw-socket client. Retried POSTs are safe: the SDK stamps a
+`stripe-node-retry-*` `Idempotency-Key` on every POST when retries are enabled,
+so a retry re-delivers the same Checkout Session instead of creating a second
+one.
+
 ---
 
 ## 6. Testing webhooks (including idempotency)
+
 
 ```bash
 npm run stripe:listen
@@ -371,7 +511,7 @@ stripe trigger checkout.session.expired # recorded, grants nothing
 | Metadata missing / tampered, client or document unknown, deal mismatch | code + test | quarantined with the reason, 200, no grant |
 | Charged amount ≠ catalogue price | code + test | quarantined, same gate |
 | Buy clicked twice / document already owned | code | `409 already_owned`, before any Stripe call |
-| Async payment method settles later | code | unpaid `completed` recorded as `deferred`, grants nothing; the async event grants |
+| Async payment method settles later | code | unpaid `completed` is marked `processed` with a `deferred: …` reason and grants nothing; the async event grants |
 | `checkout.session.expired` | code | recorded, grants nothing |
 | Refund | code + test | `revoke_access()` sets `refunded_at` + `revoked_at` |
 | Refund should also update Zoho | **documented, not built** | `TRADEOFFS.md` — needs an outbox row per refund |
@@ -514,6 +654,34 @@ substitute for the real DDL. The same applies to the portal: it typechecks and
 builds, but nobody has clicked Buy against a real Stripe account in a browser —
 so expect the first pass to be about SQL syntax and Zoho field names, not about
 handler logic.
+
+**How would you run this in production?**
+`npm run build` then `npm start`, which is `node server/dist/index.js` — the
+runtime never needs `tsx`, and `npm ci --omit=dev` is enough to boot it, because
+the compiled output imports only the six runtime packages. Config comes from the
+platform's environment, not a `.env` file. `TRUST_PROXY=1` behind the platform
+proxy so the per-IP limits see real clients. `GET /api/health` is the readiness
+probe and deliberately does not touch Supabase, so a dependency outage does not
+cause a restart loop. SIGTERM drains in-flight requests before exiting. The
+honest limits: one instance only (the limiter and Zoho token cache are
+per-process), and migrations applied out of band rather than at boot.
+
+**What did you do for loading speed, and what would you do next?**
+Start with the bug that mattered: `refresh` in `web/src/Portal.tsx` listed the
+state it also set in its own `useCallback` deps, so the portal re-fired its four
+queries on every render, forever — a request loop no test would have caught
+because the portal has never been opened against a real project. Then the
+measured stuff: the four queries run concurrently so first paint is one round
+trip, the webhook poll asks for one table instead of four (120 queries → at most
+31), `entitlements.purchase_id` got the index the refund join needed, the
+sweeper's composite index became two partial ones that skip synced rows, and the
+Stripe client timeout went from its 80 s default to 15 s. Honest limits: no
+`EXPLAIN` output exists, because there is no Postgres here and at demo row counts
+indexes are invisible; and the bundle split added 0.7 kB gzip to the first load
+so that a portal-only change re-downloads 4 kB instead of 107 kB. The remaining
+big lever is `@supabase/supabase-js` — 58 kB gzip carrying realtime code this
+portal never uses — and I did not pull it, because hand-rolling JWT refresh is
+worse than the bytes.
 
 **Which parts of the brief did you not implement?**
 Four, all of them listed in `TRADEOFFS.md` rather than left implicit: refund does

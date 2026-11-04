@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, getDownloadUrl, startCheckout } from './api';
 import { supabase } from './supabaseClient';
@@ -26,10 +26,13 @@ export function Portal({ email }: { email: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busyDocument, setBusyDocument] = useState<string | null>(null);
   const [waitingForWebhook, setWaitingForWebhook] = useState(false);
+  // The latest data, kept outside state so `refresh` has no reactive dependency.
+  const snapshotRef = useRef<Snapshot>(EMPTY);
   const entitlementCountBeforePayment = useRef(0);
 
   // Every query here is answered by Postgres under RLS. The browser asks for
   // "my" rows and cannot ask for anyone else's, even with a forged filter.
+  // The four run concurrently, so their cost is one round trip, not four.
   const refresh = useCallback(async (): Promise<Snapshot> => {
     const [documents, entitlements, purchases, crm] = await Promise.all([
       supabase.from('documents_public').select('id, title, price_cents, currency'),
@@ -41,7 +44,7 @@ export function Portal({ email }: { email: string }) {
     const problems = [documents, entitlements, purchases, crm].filter((r) => r.error);
     if (problems.length > 0) {
       setLoadError(problems.map((p) => (p.error as { message: string }).message).join('; '));
-      return snapshot;
+      return snapshotRef.current;
     }
     setLoadError(null);
     const next: Snapshot = {
@@ -50,9 +53,10 @@ export function Portal({ email }: { email: string }) {
       purchases: (purchases.data ?? []) as PurchaseRow[],
       crm: (crm.data ?? []) as CrmRow[],
     };
+    snapshotRef.current = next;
     setSnapshot(next);
     return next;
-  }, [snapshot]);
+  }, []);
 
   useEffect(() => {
     void refresh().finally(() => setLoading(false));
@@ -60,30 +64,43 @@ export function Portal({ email }: { email: string }) {
 
   // Stripe's success redirect only means "go and look". Access is granted by
   // the webhook, which may arrive after the browser has already bounced back.
+  //
+  // The poll asks for one table only. `refresh` would re-run four queries every
+  // two seconds to answer a question that needs one of them, so the wait costs
+  // up to 30 entitlement reads plus a single full refresh at the end instead of
+  // 120 queries. The baseline and the poll must count the same thing, so both
+  // use unrevoked rows.
   const justPaid = new URLSearchParams(window.location.search).get('payment') === 'completed';
   useEffect(() => {
     if (!justPaid) return;
-    entitlementCountBeforePayment.current = snapshot.entitlements.length;
+    entitlementCountBeforePayment.current = snapshotRef.current.entitlements.filter((e) => !e.revoked_at).length;
     setWaitingForWebhook(true);
     let attempts = 0;
 
     const timer = window.setInterval(async () => {
       attempts += 1;
-      const next = await refresh();
-      const unlocked = next.entitlements.length > entitlementCountBeforePayment.current;
-      if (unlocked || attempts >= POLL_MAX_ATTEMPTS) {
+      const { data, error } = await supabase
+        .from('entitlements')
+        .select('document_id, granted_at, revoked_at')
+        .is('revoked_at', null);
+      const unlocked = !error && (data?.length ?? 0) > entitlementCountBeforePayment.current;
+
+      if (error || unlocked || attempts >= POLL_MAX_ATTEMPTS) {
         window.clearInterval(timer);
         setWaitingForWebhook(false);
-        if (!unlocked) {
+        // One full refresh now that the answer is known, so the purchase and
+        // its CRM sync status appear on the unlocked card. A rejected query
+        // surfaces through that refresh's own error line rather than a notice
+        // about receipts.
+        await refresh();
+        if (!unlocked && !error) {
           setNotice('Payment looks complete but the receipt has not been processed yet. Refresh in a few seconds.');
         }
       }
     }, POLL_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
-    // snapshot is intentionally excluded: the baseline is captured once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [justPaid]);
+  }, [justPaid, refresh]);
 
   async function buy(documentId: string) {
     setBusyDocument(documentId);
@@ -110,6 +127,24 @@ export function Portal({ email }: { email: string }) {
       setBusyDocument(null);
     }
   }
+
+  // One pass over each list per fetch, instead of three linear scans per card.
+  // First match wins, which is what the previous `.find` calls did.
+  const access = useMemo(() => {
+    const entitlements = new Map<string, EntitlementRow>();
+    for (const row of snapshot.entitlements) {
+      if (!row.revoked_at && !entitlements.has(row.document_id)) entitlements.set(row.document_id, row);
+    }
+    const purchases = new Map<string, PurchaseRow>();
+    for (const row of snapshot.purchases) {
+      if (!row.refunded_at && !purchases.has(row.document_id)) purchases.set(row.document_id, row);
+    }
+    const crm = new Map<string, CrmRow>();
+    for (const row of snapshot.crm) {
+      if (!crm.has(row.purchase_id)) crm.set(row.purchase_id, row);
+    }
+    return { entitlements, purchases, crm };
+  }, [snapshot]);
 
   return (
     <main className="page">
@@ -139,9 +174,9 @@ export function Portal({ email }: { email: string }) {
       ) : (
         <ul className="cards">
           {snapshot.documents.map((document) => {
-            const entitlement = snapshot.entitlements.find((e) => e.document_id === document.id && !e.revoked_at);
-            const purchase = snapshot.purchases.find((p) => p.document_id === document.id && !p.refunded_at);
-            const crm = purchase ? snapshot.crm.find((c) => c.purchase_id === purchase.id) : undefined;
+            const entitlement = access.entitlements.get(document.id);
+            const purchase = access.purchases.get(document.id);
+            const crm = purchase ? access.crm.get(purchase.id) : undefined;
             const busy = busyDocument === document.id;
 
             return (

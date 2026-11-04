@@ -1,13 +1,30 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-// The repo root .env, resolved from this file so the script works no matter
-// which workspace directory npm started in.
-const rootEnvPath = path.resolve(fileURLToPath(import.meta.url), '../../..', '.env');
-dotenv.config({ path: rootEnvPath });
+/**
+ * Walk up from this module until a `.env` is found. Needed because the file's
+ * own location differs between `npm run dev` (server/src/env.ts) and
+ * `npm start` (server/dist/env.js): a fixed number of `..` steps would resolve
+ * one of the two outside the repo. On a hosted platform there is no `.env` at
+ * all — the dashboard injects the real variables and dotenv no-ops.
+ */
+function findRootEnvPath(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let hops = 0; hops < 5; hops++) {
+    const candidate = path.join(dir, '.env');
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.join(process.cwd(), '.env');
+}
+
+dotenv.config({ path: findRootEnvPath() });
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8787),
@@ -34,6 +51,13 @@ const schema = z.object({
   ZOHO_REDIRECT_URI: z.string().url().default('http://localhost:8790/zoho/callback'),
   ZOHO_SIMULATE_FAILURE: z.enum(['true', 'false']).default('false'),
 
+  // How many proxy hops sit in front of this process. Express counts from the
+  // left of `X-Forwarded-For`, so a hosted platform behind one reverse proxy
+  // uses 1. Left at 0 the app trusts the socket peer only — correct when
+  // exposed directly, where trusting a header would let anyone spoof `req.ip`
+  // and walk past the per-IP rate limits.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+
   SEED_CLIENT_PASSWORD: z.string().default('TestAccess!234'),
   ZOHO_DEAL_ID_CLIENT_A: z.string().default(''),
   ZOHO_DEAL_ID_CLIENT_B: z.string().default(''),
@@ -57,6 +81,7 @@ export type AppEnv = {
   zohoPaidStage: string;
   zohoRedirectUri: string;
   zohoSimulateFailure: boolean;
+  trustProxy: number;
   seedClientPassword: string;
   zohoDealIdClientA: string;
   zohoDealIdClientB: string;
@@ -91,6 +116,7 @@ export function loadEnv(overrides: Record<string, string | undefined> = {}): App
     zohoPaidStage: e.ZOHO_PAID_STAGE,
     zohoRedirectUri: e.ZOHO_REDIRECT_URI,
     zohoSimulateFailure: e.ZOHO_SIMULATE_FAILURE === 'true',
+    trustProxy: e.TRUST_PROXY,
     seedClientPassword: e.SEED_CLIENT_PASSWORD,
     zohoDealIdClientA: e.ZOHO_DEAL_ID_CLIENT_A,
     zohoDealIdClientB: e.ZOHO_DEAL_ID_CLIENT_B,

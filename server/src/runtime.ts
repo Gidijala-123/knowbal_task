@@ -25,8 +25,23 @@ export function createRuntime(env: AppEnv, log: Logger): AppDeps {
 
   // No apiVersion is pinned: the SDK then uses the version pinned on the Stripe
   // account, which is the one place it should be changed deliberately.
+  //
+  // timeout/maxNetworkRetries are set explicitly rather than left at the SDK
+  // defaults. Verified against the installed stripe@17.7.0 (esm/stripe.core.js):
+  // the default timeout is 80_000 ms and the default retries is 2, so a hung
+  // connection could occupy a checkout request for four minutes. 15 s x 3 is a
+  // far saner ceiling for a synchronous "give me a redirect URL" call.
+  // Connections are already reused: Node's https.globalAgent has keepAlive=true
+  // (verified on Node 24), and passing a custom agent would only swap the SDK
+  // onto its raw-socket client, so no httpAgent is set here.
+  // POST retries are safe: the SDK attaches a `stripe-node-retry-*`
+  // Idempotency-Key to every POST when maxNetworkRetries > 0
+  // (esm/RequestSender.js:_defaultIdempotencyKey), so a retry re-delivers the
+  // same Checkout Session instead of creating a second one.
   const stripe = new Stripe(env.stripeSecretKey, {
     appInfo: { name: 'paid-client-access', version: '1.0.0' },
+    timeout: 15_000,
+    maxNetworkRetries: 2,
   });
 
   const zohoTokens = createZohoTokenProvider(

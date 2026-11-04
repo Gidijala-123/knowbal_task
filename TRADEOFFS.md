@@ -18,6 +18,9 @@ The brief's order is the order I followed, and it is the right one:
    routing.
 
 The consequence: the portal is ugly on purpose and the webhook handler is not.
+Performance came after all four, when the brief was already met — which is why
+the work there is measured (bundle bytes, query counts) rather than speculative,
+and why it stopped at the point where a win would have cost reviewability.
 
 ## What works
 
@@ -31,9 +34,11 @@ The consequence: the portal is ugly on purpose and the webhook handler is not.
 | Zoho OAuth cache, single 401 refresh, timeout, retryable vs fatal split | done, tests with a fake fetch |
 | Outage keeps access granted, row pending, reason stored | done, tests + `ZOHO_SIMULATE_FAILURE` |
 | Retry command **and** admin endpoint, both safe to re-run | done |
+| Production start path: compiled `dist`, boots with `--omit=dev` deps only | done, probed on a dummy env |
 | Portal status + buy + download, RLS-scoped reads | done, builds; not clicked through yet |
 | 60-second signed download, path never exposed | done, tests |
 | Refund revokes access | done (schema + RPC + handler), test |
+| Portal load path: no render loop, 1 round trip, 1-table poll, indexed refund join | done, `README.md` 5C has the measurements; SQL not EXPLAINed |
 | Live RLS isolation test | written, **skipped without credentials** |
 | Docs: README, WALKTHROUGH, TRADEOFFS, `.env.example` | done |
 
@@ -48,6 +53,12 @@ adds a moving part to a demo without adding evidence.
 Paid. It needs a second field (`Refunded_At`) and an outbox row keyed per refund
 rather than per purchase — a schema change, not a few lines. Documented in
 `README.md` section 8 rather than half-built.
+
+**No Dockerfile or platform config.** There is no Docker on this machine, so an
+image I could neither build nor run would be an unverified file in the repo.
+`README.md` section 5B states what any host actually needs instead: build
+command, runtime install, start command, health path, shutdown signal, and the
+one-instance limit.
 
 **Disputes are not handled at all.** `charge.dispute.created` /
 `.closed` fall into the "ignore safely" branch. A dispute should freeze access
@@ -74,17 +85,40 @@ why it can expose fewer columns than the base table. If someone later converts
 it to `security_invoker`, RLS would apply to the base table and the view would
 start returning nothing — a trap worth a comment, and it has one in 0002.
 
+**The browser keeps `@supabase/supabase-js`.** It is 58 kB of the portal's 108 kB
+gzip and carries realtime code the portal never subscribes to, so replacing it
+with direct PostgREST `fetch` calls is the largest remaining bundle win. Not
+taken: that swap also means hand-rolling token refresh and session storage, in a
+brief whose whole point is that the browser reads Supabase under RLS. The
+security story is easier to review with the official client in it.
+
+**No attempt to shrink the first download.** Preload/prefetch tricks, a
+route-level split, or a `Login`-only first paint would all trade the current
+simple structure for a few kB, and the measured chunk split already adds 0.7 kB
+gzip to the first load in order to make every later redeploy cheap. That trade is
+in `README.md` section 5C with the numbers, including the direction it went.
+
 ## Honest verification status
 
 The four offline suites pass (40 tests) and both workspaces typecheck, but they
 test the *logic* against an in-memory repository that mirrors the unique
-constraints and the lease rules. **The five SQL migrations have not been run
+constraints and the lease rules. **The six SQL migrations have not been run
 against a Postgres instance from this machine** — no Docker, no `psql`. So:
 
-- the DDL, the RLS policies and the four RPC signatures are unverified until
+- the DDL, the RLS policies and the five RPCs the server calls (plus
+  `current_client_id()`, which the policies call) are unverified until
   `supabase db push` is run;
+- 0006 is in the same position: the indexes are attributed to named queries in
+  that file, but there is no `EXPLAIN` output for any of them here, so the claim
+  is "this is the shape the planner can use", not "this measured faster";
 - the live isolation test is skipped, not deleted;
-- nothing here has completed a real Stripe redirect or written a real Zoho Deal.
+- nothing here has completed a real Stripe redirect or written a real Zoho Deal;
+- the portal's request-loop fix and its single-table webhook poll are reasoned
+  from React's dependency rules and confirmed by typecheck + build. They have
+  not been watched in a Network tab, because that needs a live Supabase project;
+- the SIGTERM drain is registered and present in the compiled output, but
+  Windows cannot deliver `SIGTERM` to a Node process, so the clean exit itself
+  has not been observed — check it on the deploy host.
 
 First five minutes on a fresh project: apply migrations → `npm run seed` →
 `RUN_INTEGRATION=1 npm run test:integration -w server` → one real test payment.
@@ -103,6 +137,9 @@ If any of those fail, the failure is in the SQL or in the Zoho field names, and
 5. Move the limiter and token cache to Redis before running more than one
    instance.
 6. Playwright smoke test for buy → unlock → download.
+7. `EXPLAIN (ANALYZE, BUFFERS)` the portal's four queries and the refund update
+   on a real project with realistic row counts, then let the plans decide whether
+   0006 earns its keep or whether `entitlements_client_idx` should go too.
 
 ## Things I would change about the design, given more time
 

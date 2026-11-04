@@ -64,7 +64,7 @@ create table if not exists public.stripe_events (
   received_at  timestamptz not null default now(),
   processed_at timestamptz,
   status       text not null default 'received'
-               check (status in ('received', 'processed', 'duplicate', 'quarantined', 'failed')),
+               check (status in ('received', 'processed', 'quarantined', 'failed')),
   purchase_id  uuid references public.purchases (id) on delete set null,
   error        text
 );

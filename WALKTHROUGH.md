@@ -38,7 +38,7 @@ Click **Buy access for $19.00**. Before redirecting, show the request:
 curl -s -X POST http://127.0.0.1:8787/api/checkout \
   -H "authorization: Bearer <A's access token>" \
   -H 'content-type: application/json' \
-  -d '{"documentId":"33333333-3333-4333-8333-333333333333","amountCents":1}'
+  -d '{"documentId":"00000000-0000-4000-8000-000000000001","amountCents":1}'
 ```
 
 Say: the body tried to pay one cent. It is ignored — the amount comes from the
@@ -134,7 +134,7 @@ Sign out, sign in as `client-b@example.com`.
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" \
-  http://127.0.0.1:8787/api/documents/33333333-3333-4333-8333-333333333333/download \
+  http://127.0.0.1:8787/api/documents/00000000-0000-4000-8000-000000000001/download \
   -H "authorization: Bearer <B's access token>"
 # 403
 ```
