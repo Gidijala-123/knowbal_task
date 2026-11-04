@@ -1,0 +1,25 @@
+# secrets — never commit these
+.env
+.env.*
+!.env.example
+web/.env
+web/.env.*
+!web/.env.example
+
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# local tooling
+.supabase/
+stripe-cli.pid
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

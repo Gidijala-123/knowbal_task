@@ -1,0 +1,31 @@
+{
+  "name": "paid-client-access",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Paid Client Access: Stripe test Checkout -> Supabase entitlement -> Zoho CRM Deal sync",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w server && npm run build -w web",
+    "start": "npm run start -w server",
+    "test": "npm run test -w server",
+    "test:integration": "npm run test:integration -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "seed": "npm run seed -w server",
+    "retry-crm-sync": "npm run retry-crm-sync -w server --",
+    "zoho:bootstrap": "npm run zoho:bootstrap -w server",
+    "stripe:listen": "stripe listen --forward-to localhost:8787/api/webhook"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
