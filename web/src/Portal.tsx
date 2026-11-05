@@ -73,6 +73,9 @@ export function Portal({ email }: { email: string }) {
   const justPaid = new URLSearchParams(window.location.search).get('payment') === 'completed';
   useEffect(() => {
     if (!justPaid) return;
+    // Clear the query string immediately so signing out and back in (or
+    // switching to Client B) never shows this banner for an unrelated session.
+    window.history.replaceState({}, '', window.location.pathname);
     entitlementCountBeforePayment.current = snapshotRef.current.entitlements.filter((e) => !e.revoked_at).length;
     setWaitingForWebhook(true);
     let attempts = 0;
