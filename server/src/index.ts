@@ -15,6 +15,7 @@ const server = app.listen(env.port, () => {
     trustProxy: env.trustProxy,
     webhookPath: '/api/webhook',
     zohoSimulateFailure: env.zohoSimulateFailure,
+    supabaseProject: env.supabaseUrl.replace('https://', '').split('.')[0],
   });
 });
 
