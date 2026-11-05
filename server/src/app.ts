@@ -36,7 +36,9 @@ export function createApp(deps: AppDeps): Express {
     res.status(404).json({ error: 'not_found' });
   });
 
-  // Backstop for anything that throws inside an async handler.
+  // Reached when a handler calls next(err) or throws synchronously. An async
+  // handler that merely rejects does NOT get here on Express 4, which is why
+  // every async route is wrapped in asyncHandler.
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     deps.log.error('unhandled request error', {
       path: req.path,

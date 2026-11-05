@@ -191,4 +191,5 @@ is `supabase db push` followed by the integration test.
 | isolation at the HTTP edge | the two `curl`s at 10:30 |
 | isolation in the database | `RUN_INTEGRATION=1 npm run test:integration -w server` |
 | forged webhook | the `curl` at 12:30 |
-| everything at once | `npm test` (40 tests) |
+| a dependency outage is a 500, not a dead server | `curl -i -H "x-admin-key: $ADMIN_API_KEY" localhost:8787/api/admin/crm-sync` with a placeholder Supabase URL, then `/api/health` still 200 |
+| everything at once | `npm test` (44 tests) |

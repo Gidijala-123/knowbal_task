@@ -23,3 +23,7 @@ npm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+# agent / tooling artefacts
+.agents/
+*.tlog
+tlog.txt

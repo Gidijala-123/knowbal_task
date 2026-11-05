@@ -5,6 +5,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 
 import type { AppDeps } from '../deps.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
 function requireAdmin(deps: AppDeps) {
@@ -38,7 +39,7 @@ export function createAdminRouter(deps: AppDeps): Router {
   const guard = requireAdmin(deps);
   const limiter = rateLimit({ windowMs: 60_000, max: 20, key: 'admin' });
 
-  router.post('/api/admin/retry-crm-sync', guard, limiter, async (req, res) => {
+  router.post('/api/admin/retry-crm-sync', guard, limiter, asyncHandler(async (req, res) => {
     const parsed = bodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ error: 'invalid_request' });
@@ -51,12 +52,12 @@ export function createAdminRouter(deps: AppDeps): Router {
       return acc;
     }, {});
     res.json({ attempted: outcomes.length, summary, outcomes });
-  });
+  }));
 
-  router.get('/api/admin/crm-sync', guard, limiter, async (req, res) => {
+  router.get('/api/admin/crm-sync', guard, limiter, asyncHandler(async (req, res) => {
     const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
     res.json({ due: await deps.repo.listCrmSyncDue(limit) });
-  });
+  }));
 
   return router;
 }

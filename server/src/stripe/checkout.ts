@@ -25,14 +25,15 @@ export async function createCheckoutSession(
     })).id;
 
   const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = env.stripePriceId
-    ? { price: env.stripePriceId }
+    ? { price: env.stripePriceId, quantity: 1 }
     : {
-        price_data: {
-          currency: document.currency,
-          unit_amount: document.priceCents,
-          product_data: { name: document.title },
-        },
-      };
+      price_data: {
+        currency: document.currency,
+        unit_amount: document.priceCents,
+        product_data: { name: document.title },
+      },
+      quantity: 1,
+    };
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',

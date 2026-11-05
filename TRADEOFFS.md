@@ -31,6 +31,7 @@ and why it stopped at the point where a win would have cost reviewability.
 | One-transaction grant via `grant_purchase()` | written; SQL not yet executed here |
 | Three-gate idempotency, including concurrent deliveries | done, tests incl. 5 racing deliveries |
 | 500-then-retry path when our DB write fails | done, test proves the customer is not stranded |
+| A rejecting dependency answers 500 instead of exiting the process | done, 4 tests; found live when an admin call against an unreachable Supabase host killed the dev server |
 | Zoho OAuth cache, single 401 refresh, timeout, retryable vs fatal split | done, tests with a fake fetch |
 | Outage keeps access granted, row pending, reason stored | done, tests + `ZOHO_SIMULATE_FAILURE` |
 | Retry command **and** admin endpoint, both safe to re-run | done |
@@ -100,7 +101,7 @@ in `README.md` section 5C with the numbers, including the direction it went.
 
 ## Honest verification status
 
-The four offline suites pass (40 tests) and both workspaces typecheck, but they
+The five offline suites pass (44 tests) and both workspaces typecheck, but they
 test the *logic* against an in-memory repository that mirrors the unique
 constraints and the lease rules. **The six SQL migrations have not been run
 against a Postgres instance from this machine** — no Docker, no `psql`. So:
@@ -118,7 +119,12 @@ against a Postgres instance from this machine** — no Docker, no `psql`. So:
   not been watched in a Network tab, because that needs a live Supabase project;
 - the SIGTERM drain is registered and present in the compiled output, but
   Windows cannot deliver `SIGTERM` to a Node process, so the clean exit itself
-  has not been observed — check it on the deploy host.
+  has not been observed — check it on the deploy host;
+- the four original suites call the handlers through a real HTTP server, but
+  never with a collaborator that rejects, so the Express 4 `unhandledRejection`
+  crash described above survived every green test run until the app was pointed
+  at an address that does not answer. The new suite is the first thing here that
+  tests the *transport*, not just the logic.
 
 First five minutes on a fresh project: apply migrations → `npm run seed` →
 `RUN_INTEGRATION=1 npm run test:integration -w server` → one real test payment.

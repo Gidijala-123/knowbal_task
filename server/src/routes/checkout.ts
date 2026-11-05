@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import type { AppDeps } from '../deps.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireUser, type AuthedRequest } from '../middleware/requireUser.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { createCheckoutSession } from '../stripe/checkout.js';
@@ -15,7 +16,7 @@ export function createCheckoutRouter(deps: AppDeps): Router {
     '/api/checkout',
     rateLimit({ windowMs: 60_000, max: 10, key: 'checkout' }),
     requireUser(deps.auth),
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
       const user = (req as AuthedRequest).user;
       if (!user) return; // requireUser already answered
 
@@ -60,7 +61,7 @@ export function createCheckoutRouter(deps: AppDeps): Router {
         amountCents: document.priceCents,
       });
       res.json({ checkoutUrl: created.url, sessionId: created.sessionId });
-    }
+    })
   );
 
   return router;

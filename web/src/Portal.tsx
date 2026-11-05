@@ -165,9 +165,22 @@ export function Portal({ email }: { email: string }) {
         </div>
       </header>
 
-      {waitingForWebhook && <p className="notice">Waiting for Stripe to confirm your payment...</p>}
-      {notice && <p className="notice">{notice}</p>}
-      {loadError && <p className="error">Supabase refused the query: {loadError}</p>}
+      {waitingForWebhook && (
+        <div className="payment-banner payment-banner--processing anim-fade-in">
+          <span className="spinner" aria-hidden="true" />
+          <span>Waiting for Stripe to confirm your payment…</span>
+        </div>
+      )}
+      {notice && (
+        <div className={`payment-banner ${notice.toLowerCase().includes('complete') ? 'payment-banner--success' : 'payment-banner--warn'} anim-slide-down`}>
+          {notice.toLowerCase().includes('complete') ? '✓' : '⚠'} {notice}
+        </div>
+      )}
+      {loadError && (
+        <div className="payment-banner payment-banner--error anim-shake">
+          ✕ Supabase refused the query: {loadError}
+        </div>
+      )}
 
       {loading ? (
         <p className="muted">Loading your access status...</p>
@@ -180,7 +193,7 @@ export function Portal({ email }: { email: string }) {
             const busy = busyDocument === document.id;
 
             return (
-              <li key={document.id} className="card">
+              <li key={document.id} className={`card anim-fade-in${entitlement ? ' card--unlocked' : ''}`}>
                 <div className="card-head">
                   <h2>{document.title}</h2>
                   <span className={entitlement ? 'badge unlocked' : 'badge locked'}>

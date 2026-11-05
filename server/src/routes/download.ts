@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import type { AppDeps } from '../deps.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireUser, type AuthedRequest } from '../middleware/requireUser.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
@@ -21,7 +22,7 @@ export function createDownloadRouter(deps: AppDeps): Router {
     '/api/documents/:id/download',
     rateLimit({ windowMs: 60_000, max: 30, key: 'download' }),
     requireUser(deps.auth),
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
       const user = (req as AuthedRequest).user;
       if (!user) return;
 
@@ -48,7 +49,7 @@ export function createDownloadRouter(deps: AppDeps): Router {
 
       const url = await deps.storage.createDownloadUrl(entitlement.storagePath, DOWNLOAD_URL_TTL_SECONDS);
       res.json({ url, expiresIn: DOWNLOAD_URL_TTL_SECONDS });
-    }
+    })
   );
 
   return router;

@@ -21,6 +21,19 @@ const DOCUMENT = {
   currency: 'usd',
 };
 
+const EXTRA_DOCUMENTS = [
+  { id: '00000000-0000-4000-8000-000000000002', title: 'Financial Planning Guide 2026', storagePath: 'sample-document.pdf', priceCents: 2900, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000003', title: 'Investment Strategy Report', storagePath: 'sample-document.pdf', priceCents: 4900, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000004', title: 'Tax Optimisation Handbook', storagePath: 'sample-document.pdf', priceCents: 3500, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000005', title: 'Real Estate Due Diligence Checklist', storagePath: 'sample-document.pdf', priceCents: 1500, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000006', title: 'Business Valuation Framework', storagePath: 'sample-document.pdf', priceCents: 5900, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000007', title: 'Startup Funding Playbook', storagePath: 'sample-document.pdf', priceCents: 3900, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000008', title: 'Risk Management Essentials', storagePath: 'sample-document.pdf', priceCents: 2500, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000009', title: 'Mergers & Acquisitions Primer', storagePath: 'sample-document.pdf', priceCents: 7900, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000010', title: 'Portfolio Diversification Strategies', storagePath: 'sample-document.pdf', priceCents: 3200, currency: 'usd' },
+  { id: '00000000-0000-4000-8000-000000000011', title: 'Compliance & Regulatory Overview', storagePath: 'sample-document.pdf', priceCents: 4200, currency: 'usd' },
+];
+
 const CLIENTS = [
   { id: '00000000-0000-4000-8000-0000000000a1', email: 'client-a@example.com', label: 'Client A' },
   { id: '00000000-0000-4000-8000-0000000000a2', email: 'client-b@example.com', label: 'Client B' },
@@ -78,6 +91,16 @@ async function main(): Promise<void> {
   );
   if (docError) throw new Error(`upsert document failed: ${docError.message}`);
   log.info('document ready', { documentId: DOCUMENT.id, priceCents: DOCUMENT.priceCents });
+
+  // Upsert the extra showcase documents
+  for (const doc of EXTRA_DOCUMENTS) {
+    const { error: extraErr } = await db.from('documents').upsert(
+      { id: doc.id, title: doc.title, storage_path: doc.storagePath, price_cents: doc.priceCents, currency: doc.currency },
+      { onConflict: 'id' }
+    );
+    if (extraErr) throw new Error(`upsert document "${doc.title}" failed: ${extraErr.message}`);
+    log.info('document ready', { documentId: doc.id, title: doc.title });
+  }
 
   const dealIds: Record<string, string> = {
     'client-a@example.com': env.zohoDealIdClientA,
