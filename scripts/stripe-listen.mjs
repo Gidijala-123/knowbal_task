@@ -35,7 +35,7 @@ console.log('[stripe-listen] Will auto-patch STRIPE_WEBHOOK_SECRET in .env when 
 
 const child = spawn(
   'stripe',
-  ['listen', '--forward-to', FORWARD_TO],
+  ['listen', '--forward-to', FORWARD_TO, '--all-snapshot'],
   { stdio: ['inherit', 'pipe', 'pipe'] }
 );
 
