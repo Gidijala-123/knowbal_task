@@ -44,11 +44,15 @@ export function createZohoTokenProvider(
   let inflight: Promise<string> | null = null;
 
   async function refresh(): Promise<string> {
+    // Read refresh token dynamically so updating .env takes effect without
+    // restarting the server. The token provider is created once at startup,
+    // but the refresh token can be rotated by updating the env variable.
+    const refreshToken = process.env.ZOHO_REFRESH_TOKEN ?? cfg.refreshToken;
     const form = new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: cfg.clientId,
       client_secret: cfg.clientSecret,
-      refresh_token: cfg.refreshToken,
+      refresh_token: refreshToken,
     });
 
     let response: Response;
@@ -70,6 +74,7 @@ export function createZohoTokenProvider(
     };
 
     if (!response.ok || typeof json.access_token !== 'string') {
+      cache = null; // clear stale cache so the next attempt forces a fresh fetch
       throw new ZohoAuthError(
         `zoho token refresh rejected (http ${response.status}${json.error ? `, ${json.error}` : ''})`,
         json.error === 'invalid_grant'
