@@ -22,12 +22,7 @@ type HandlerDeps = Pick<AppDeps, 'repo' | 'crm' | 'log'>;
  *        and the entitlement has not been written yet
  */
 export async function handleStripeEvent(event: Stripe.Event, deps: HandlerDeps): Promise<WebhookOutcome> {
-  // The Stripe CLI `--all-thin` flag prefixes event types with `v1.`
-  // (e.g. `v1.checkout.session.completed`). Strip it so the switch below
-  // matches both the CLI thin-event format and the standard webhook format.
-  const eventType = event.type.replace(/^v\d+\./, '') as Stripe.Event['type'];
-
-  switch (eventType) {
+  switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.payment_status === 'paid') return grantFromSession(session, event, deps);
