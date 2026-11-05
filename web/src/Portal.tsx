@@ -64,19 +64,27 @@ export function Portal({ email }: { email: string }) {
 
   // Stripe's success redirect only means "go and look". Access is granted by
   // the webhook, which may arrive after the browser has already bounced back.
-  //
-  // The poll asks for one table only. `refresh` would re-run four queries every
-  // two seconds to answer a question that needs one of them, so the wait costs
-  // up to 30 entitlement reads plus a single full refresh at the end instead of
-  // 120 queries. The baseline and the poll must count the same thing, so both
-  // use unrevoked rows.
-  const justPaid = new URLSearchParams(window.location.search).get('payment') === 'completed';
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const justPaid = params.get('payment') === 'completed';
+    const sessionId = params.get('session_id') ?? '(none)';
+
     if (!justPaid) return;
-    // Clear the query string immediately so signing out and back in (or
-    // switching to Client B) never shows this banner for an unrelated session.
+
+    // Clear the query string immediately — must happen before any state update
+    // so a sign-out/re-login never replays this banner.
     window.history.replaceState({}, '', window.location.pathname);
-    entitlementCountBeforePayment.current = snapshotRef.current.entitlements.filter((e) => !e.revoked_at).length;
+    console.log('[portal] payment=completed detected, session:', sessionId);
+    console.log('[portal] current entitlement count at redirect:', snapshotRef.current.entitlements.filter((e) => !e.revoked_at).length);
+
+    // Capture baseline AFTER the initial refresh has run (it's triggered by the
+    // refresh useEffect above and runs before this one because effects fire in
+    // declaration order). If the webhook already landed before the redirect came
+    // back, the baseline will already include the new row — in that case the
+    // poll finds 0 new rows and we do a full refresh to show the unlocked state.
+    const baseline = snapshotRef.current.entitlements.filter((e) => !e.revoked_at).length;
+    entitlementCountBeforePayment.current = baseline;
+
     setWaitingForWebhook(true);
     let attempts = 0;
 
@@ -86,15 +94,16 @@ export function Portal({ email }: { email: string }) {
         .from('entitlements')
         .select('document_id, granted_at, revoked_at')
         .is('revoked_at', null);
-      const unlocked = !error && (data?.length ?? 0) > entitlementCountBeforePayment.current;
+
+      const currentCount = data?.length ?? 0;
+      const unlocked = !error && currentCount > baseline;
+
+      console.log(`[portal] poll attempt ${attempts}/${POLL_MAX_ATTEMPTS}: entitlements=${currentCount}, baseline=${baseline}, unlocked=${unlocked}, error=${error?.message ?? 'none'}`);
 
       if (error || unlocked || attempts >= POLL_MAX_ATTEMPTS) {
         window.clearInterval(timer);
         setWaitingForWebhook(false);
-        // One full refresh now that the answer is known, so the purchase and
-        // its CRM sync status appear on the unlocked card. A rejected query
-        // surfaces through that refresh's own error line rather than a notice
-        // about receipts.
+        console.log(`[portal] poll ended — unlocked=${unlocked}, error=${error?.message ?? 'none'}, attempts=${attempts}`);
         await refresh();
         if (!unlocked && !error) {
           setNotice('Payment looks complete but the receipt has not been processed yet. Refresh in a few seconds.');
@@ -102,8 +111,12 @@ export function Portal({ email }: { email: string }) {
       }
     }, POLL_INTERVAL_MS);
 
-    return () => window.clearInterval(timer);
-  }, [justPaid, refresh]);
+    return () => {
+      console.log('[portal] poll cleanup');
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount — reads URL before replaceState clears it
 
   async function buy(documentId: string) {
     setBusyDocument(documentId);
