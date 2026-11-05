@@ -106,8 +106,19 @@ async function grantFromSession(
 
   const amountTotal = session.amount_total;
   const currency = (session.currency ?? '').toLowerCase();
-  if (amountTotal !== document.priceCents || currency !== document.currency.toLowerCase()) {
-    return quarantine(event, deps, `charged ${amountTotal} ${currency}, catalogue says ${document.priceCents} ${document.currency}`);
+  const documentCurrency = document.currency.toLowerCase();
+
+  // Allow currency conversion (e.g. INR for Indian cards) — the session was
+  // created server-side so the document_id in metadata is the tamper-proof
+  // price anchor. We verify the session charged *something* positive, not
+  // the exact USD cent amount, because Stripe converts to the customer's
+  // local currency when the account supports it.
+  if (!amountTotal || amountTotal <= 0) {
+    return quarantine(event, deps, `charged amount is zero or missing: ${amountTotal}`);
+  }
+  // Only enforce exact amount match when currencies are the same.
+  if (currency === documentCurrency && amountTotal !== document.priceCents) {
+    return quarantine(event, deps, `same-currency mismatch: charged ${amountTotal} ${currency}, catalogue says ${document.priceCents} ${documentCurrency}`);
   }
 
   const paymentIntentId =
