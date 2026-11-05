@@ -108,6 +108,7 @@ export function createZohoDealClient(
     });
 
     const payload = (await response.json().catch(() => null)) as ZohoBody | null;
+    log.info('zoho deal update response', { status: response.status, code: payload?.data?.[0]?.code, message: payload?.data?.[0]?.message ?? payload?.message });
     return classify(response.status, payload);
   }
 }
