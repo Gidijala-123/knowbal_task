@@ -44,6 +44,7 @@ export function createWebhookRouter(deps: AppDeps): Router {
       deps.log.error('webhook handler threw', {
         eventId: event.id,
         error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
       });
       res.status(500).json({ error: 'webhook_processing_failed' });
     }

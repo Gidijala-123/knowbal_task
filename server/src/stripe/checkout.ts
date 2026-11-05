@@ -49,6 +49,11 @@ export async function createCheckoutSession(
     line_items: [lineItem],
     allow_promotion_codes: false,
     billing_address_collection: 'auto',
+    // Lock currency to USD so Stripe never shows a local-currency conversion
+    // option. Without this, Indian cards see an INR option whose amount_total
+    // does not equal document.priceCents (USD cents), which causes the webhook
+    // handler to quarantine the event as a price mismatch.
+    currency: document.currency,
     success_url: `${env.appBaseUrl}/?payment=completed&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${env.appBaseUrl}/?payment=cancelled`,
   });

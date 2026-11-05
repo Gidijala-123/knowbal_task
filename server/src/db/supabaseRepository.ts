@@ -35,6 +35,8 @@ export function createSupabaseRepository(db: Db): Repository {
         .from('stripe_events')
         .insert({ event_id: eventId, type, status: 'received' });
       if (!error) return 'new';
+      // Log the raw Supabase error so it appears in the server terminal
+      console.error('[recordEvent] insert error:', JSON.stringify({ code: error.code, message: error.message, details: error.details, hint: error.hint }));
       if (error.code !== UNIQUE_VIOLATION) fail('recordEvent', error);
 
       // Already in the ledger: only a completed or quarantined verdict may stop
@@ -144,6 +146,7 @@ export function createSupabaseRepository(db: Db): Repository {
         p_zoho_deal_id: input.zohoDealId,
         p_event_id: input.eventId,
       });
+      if (error) console.error('[grantPurchase] rpc error:', JSON.stringify({ code: error.code, message: error.message, details: error.details }));
       fail('grant_purchase', error);
       const row = data as { purchase_id: string; is_new: boolean } | null;
       if (!row?.purchase_id) throw new Error('grant_purchase returned no purchase id');
