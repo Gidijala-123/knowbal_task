@@ -105,8 +105,13 @@ export function Portal({ email }: { email: string }) {
         setWaitingForWebhook(false);
         console.log(`[portal] poll ended — unlocked=${unlocked}, error=${error?.message ?? 'none'}, attempts=${attempts}`);
         await refresh();
-        if (!unlocked && !error) {
-          setNotice('Payment looks complete but the receipt has not been processed yet. Refresh in a few seconds.');
+        // Only show the notice if Supabase itself errored. If polling just timed
+        // out without finding a new entitlement, stay silent — the most common
+        // cause is a currency mismatch (INR vs USD) which quarantines the event
+        // server-side. Showing a confusing "receipt not processed" message makes
+        // it look like a system error when it is a user action issue.
+        if (error) {
+          setNotice('Could not check payment status. Please refresh the page.');
         }
       }
     }, POLL_INTERVAL_MS);

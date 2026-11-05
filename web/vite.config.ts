@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173, strictPort: true },
+  server: { port: 5173, strictPort: true, hmr: true, headers: { 'Cache-Control': 'no-store' } },
   build: {
     // The portal only ever ships to evergreen browsers, so skip esbuild's
     // downlevel transforms instead of paying them in bytes.
