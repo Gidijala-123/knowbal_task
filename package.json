@@ -22,7 +22,7 @@
     "env:make-admin-key": "npm run env:make-admin-key -w server",
     "retry-crm-sync": "npm run retry-crm-sync -w server --",
     "zoho:bootstrap": "npm run zoho:bootstrap -w server",
-    "stripe:listen": "stripe listen --forward-to localhost:8787/api/webhook"
+    "stripe:listen": "node scripts/stripe-listen.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

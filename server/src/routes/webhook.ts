@@ -22,7 +22,12 @@ export function createWebhookRouter(deps: AppDeps): Router {
 
     let event: Stripe.Event;
     try {
-      event = deps.stripe.webhooks.constructEvent(req.body as Buffer, signature, deps.env.stripeWebhookSecret);
+      // Read the secret at request time rather than once at startup so that
+      // restarting `stripe listen` (which prints a new whsec_) auto-updates
+      // without requiring a server restart. STRIPE_WEBHOOK_SECRET in the
+      // environment is patched by the `stripe:listen` npm script.
+      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? deps.env.stripeWebhookSecret;
+      event = deps.stripe.webhooks.constructEvent(req.body as Buffer, signature, webhookSecret);
     } catch (err) {
       // Tampered body, wrong secret, or a replay outside the tolerance window.
       deps.log.warn('webhook signature verification failed', {
