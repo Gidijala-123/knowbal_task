@@ -75,6 +75,13 @@ select event_id, type, status from public.stripe_events order by received_at des
 select id, amount_cents, currency, paid_at from public.purchases order by paid_at desc limit 2;
 select client_id, document_id, granted_at from public.entitlements order by granted_at desc limit 2;
 select purchase_id, status, attempts, synced_at from public.crm_sync order by last_attempt_at desc limit 2;
+
+or 
+
+select * from purchases;
+select * from crm_sync;
+select * from stripe_events;
+
 ```
 
 "Four rows from one payment — the event ledger, the purchase, the entitlement,
@@ -90,15 +97,29 @@ ID and amount are filled in. This was updated automatically by the webhook."
 
 ## SECTION 4 — IDEMPOTENCY
 
-*(in terminal, resend the event:)*
-```bash
-stripe events resend evt_<id>
+*(look at the terminal where stripe:listen is running — you'll see a line like:)*
+```
+--> checkout.session.completed [evt_test_65Vhox...]
 ```
 
-"The server logs 'duplicate delivery ignored'. Run the SQL again — same row
-counts. Three independent database constraints stop a double grant: the event ID
-primary key, the unique Stripe session ID on purchases, and the unique client +
-document pair on entitlements."
+*(copy that evt_... id, then run in the same terminal:)*
+```bash
+stripe events resend evt_test_65Vhox...
+```
+
+"I'm resending the exact same payment event that just came in — same event ID,
+same payload. Watch the server log."
+
+*(switch to the server terminal — it will show:)*
+```
+"message":"duplicate delivery ignored"
+```
+
+"The server recognised it as a duplicate and stopped immediately. If I run the
+SQL again, same row counts — no second purchase, no second entitlement, no second
+Zoho call. Three database constraints stop a double grant: the event ID primary
+key, the unique Stripe session ID on purchases, and the unique client + document
+pair on entitlements."
 
 ---
 
